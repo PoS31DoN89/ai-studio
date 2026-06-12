@@ -690,7 +690,7 @@ async function generateVideo() {
   setStatus('Creando job de vídeo...','loading');
   const [width,height]=size.split('x');
   try {
-    const vidPayload = {model:CFG.videoDeployment,prompt,size:`${width}x${height}`,n_seconds:parseInt(seconds),n_variants:1};
+    const vidPayload = {model:CFG.videoDeployment,prompt,size:`${width}x${height}`,seconds:parseInt(seconds)};
     if (vidRefB64) {
       if (vidRefType === 'image') vidPayload.image = vidRefB64;
       else if (vidRefType === 'video') vidPayload.video = vidRefB64;
