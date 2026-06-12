@@ -475,10 +475,40 @@ async function loadChatList() {
   (data || []).forEach(chat => {
     const item = document.createElement('div');
     item.className = 'chat-item' + (chat.id === currentChatId ? ' active' : '');
-    item.textContent = chat.title || 'Conversación';
-    item.onclick = () => loadChat(chat.id);
+    item.style.display = 'flex';
+    item.style.alignItems = 'center';
+    item.style.justifyContent = 'space-between';
+    item.style.gap = '6px';
+    const title = document.createElement('span');
+    title.textContent = chat.title || 'Conversación';
+    title.style.overflow = 'hidden';
+    title.style.textOverflow = 'ellipsis';
+    title.style.whiteSpace = 'nowrap';
+    title.style.flex = '1';
+    title.style.cursor = 'pointer';
+    title.onclick = () => loadChat(chat.id);
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '✕';
+    delBtn.style.cssText = 'background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px;padding:2px 4px;flex-shrink:0;opacity:0;transition:opacity 0.2s';
+    delBtn.onclick = (e) => { e.stopPropagation(); deleteChat(chat.id); };
+    item.addEventListener('mouseenter', () => delBtn.style.opacity = '1');
+    item.addEventListener('mouseleave', () => delBtn.style.opacity = '0');
+    item.appendChild(title);
+    item.appendChild(delBtn);
     list.appendChild(item);
   });
+}
+
+async function deleteChat(chatId) {
+  if (!confirm('¿Eliminar esta conversación?')) return;
+  await sb.from('chats').delete().eq('id', chatId);
+  if (currentChatId === chatId) {
+    currentChatId = null;
+    chatMessages = [];
+    renderMessages();
+  }
+  await loadChatList();
+  showToast('Conversación eliminada');
 }
 
 async function loadChat(chatId) {
@@ -627,7 +657,19 @@ function addImageToGallery(src, prompt, prepend=true) {
   const label=document.createElement('div'); label.className='gallery-item-prompt'; label.textContent=prompt;
   const dlBtn=document.createElement('button'); dlBtn.className='download-btn'; dlBtn.title='Descargar'; dlBtn.textContent='⬇';
   dlBtn.onclick=()=>{const a=document.createElement('a');a.href=src;a.download=prompt.slice(0,40).replace(/[^a-z0-9]/gi,'_')+'.png';a.click();};
-  info.appendChild(label); info.appendChild(dlBtn);
+  const delBtn=document.createElement('button'); delBtn.className='download-btn'; delBtn.title='Eliminar'; delBtn.textContent='🗑';
+  delBtn.style.color='var(--error)';
+  delBtn.onclick=async()=>{
+    if(!confirm('¿Eliminar imagen?')) return;
+    await sb.from('images').delete().eq('user_id',currentUser.id).eq('url',src);
+    item.remove();
+    showToast('Imagen eliminada');
+    if(!document.getElementById('gallery-grid').children.length){
+      document.getElementById('gallery-grid').style.display='none';
+      document.getElementById('gallery-empty').style.display='flex';
+    }
+  };
+  info.appendChild(label); info.appendChild(dlBtn); info.appendChild(delBtn);
   item.appendChild(img); item.appendChild(info);
   if(prepend) grid.insertBefore(item,grid.firstChild); else grid.appendChild(item);
 }
@@ -639,7 +681,14 @@ async function loadVideos() {
   document.getElementById('video-gallery-empty').style.display='none';
   const grid=document.getElementById('video-grid'); grid.style.display='grid';
   data.forEach(v => {
-    if (v.url) addVideoToGallery(v.url, v.prompt, false);
+    if (v.url) {
+      // Video completado — mostrar en galería
+      addVideoToGallery(v.url, v.prompt, false);
+    } else if (v.job_id && (v.status === 'pending' || v.status === 'running')) {
+      // Video pendiente — reanudar polling
+      addVideoStatusCard(v.job_id, v.prompt);
+      pollVideoJob(v.job_id, v.prompt, v.id);
+    }
   });
 }
 
