@@ -344,10 +344,14 @@ const sb = (supabase.default || supabase).createClient(SUPABASE_URL, SUPABASE_KE
 const PROXY_URL = 'https://ai-studio-proxy-dubmbjgjg2chfybu.swedencentral-01.azurewebsites.net/api/proxy';
 
 async function callProxy(type, payload) {
-  const { data: sessionData } = await sb.auth.getSession();
+  // Refrescar sesión si es necesario
+  let { data: sessionData } = await sb.auth.getSession();
+  if (!sessionData?.session) {
+    const { data: refreshed } = await sb.auth.refreshSession();
+    sessionData = refreshed;
+  }
   const token = sessionData?.session?.access_token;
-  console.log('callProxy', type, 'token:', token ? 'OK' : 'NULL');
-  if (!token) throw new Error('Sin sesión activa');
+  if (!token) throw new Error('Sin sesión activa — por favor vuelve a iniciar sesión');
 
   const res = await fetch(PROXY_URL, {
     method: 'POST',
@@ -358,7 +362,6 @@ async function callProxy(type, payload) {
     },
     body: JSON.stringify({ type, payload })
   });
-  console.log('proxy response status:', res.status);
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
   return await res.json();
 }
@@ -769,10 +772,13 @@ async function pollVideoJob(jobId, prompt, dbId) {
   const poll=async()=>{
     attempts++;
     try {
-      const { data: { session } } = await sb.auth.getSession();
+      let { data: pollSessionData } = await sb.auth.getSession();
+      if (!pollSessionData?.session) { const { data: r } = await sb.auth.refreshSession(); pollSessionData = r; }
+      const pollToken = pollSessionData?.session?.access_token;
+      if (!pollToken) { if(info)info.textContent='Sesión expirada — recarga la página'; return; }
       const pollRes=await fetch(PROXY_URL, {
         method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_KEY},
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${pollToken}`,'apikey':SUPABASE_KEY},
         body:JSON.stringify({type:'video_status',payload:{jobId}})
       });
       if(!pollRes.ok)throw new Error(`HTTP ${pollRes.status}`);
@@ -790,10 +796,12 @@ async function pollVideoJob(jobId, prompt, dbId) {
         if(badge){badge.className='video-status-badge badge-succeeded';badge.textContent='✅ Listo';}
         if(bar)bar.style.width='100%';
         if(info)info.textContent='Descargando...';
-        const { data: { session: dlSession } } = await sb.auth.getSession();
+        let { data: dlSessionData } = await sb.auth.getSession();
+        if (!dlSessionData?.session) { const { data: r } = await sb.auth.refreshSession(); dlSessionData = r; }
+        const dlToken = dlSessionData?.session?.access_token;
         const dlRes=await fetch(PROXY_URL, {
           method:'POST',
-          headers:{'Content-Type':'application/json','Authorization':`Bearer ${dlSession.access_token}`,'apikey':SUPABASE_KEY},
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${dlToken}`,'apikey':SUPABASE_KEY},
           body:JSON.stringify({type:'video_download',payload:{jobId}})
         });
         if(dlRes.ok){
