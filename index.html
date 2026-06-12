@@ -682,7 +682,7 @@ async function loadVideos() {
   const grid=document.getElementById('video-grid'); grid.style.display='grid';
   data.forEach(v => {
     if (v.url) {
-      // Video completado — mostrar en galería
+      // Video completado — mostrar en galería (job: prefix = re-download needed)
       addVideoToGallery(v.url, v.prompt, false);
     } else if (v.job_id && (v.status === 'pending' || v.status === 'running')) {
       // Video pendiente — reanudar polling
@@ -798,10 +798,10 @@ async function pollVideoJob(jobId, prompt, dbId) {
         });
         if(dlRes.ok){
           const blob=await dlRes.blob();
-          const url=URL.createObjectURL(blob);
-          replaceCardWithVideo(jobId,url,prompt);
-          // Guardar URL en Supabase
-          if(dbId)await sb.from('videos').update({url,status:'succeeded'}).eq('id',dbId);
+          const blobUrl=URL.createObjectURL(blob);
+          // Guardar jobId como referencia en Supabase para poder re-descargar
+          if(dbId)await sb.from('videos').update({url:'job:'+jobId,status:'succeeded'}).eq('id',dbId);
+          replaceCardWithVideo(jobId,blobUrl,prompt,jobId);
           setStatus('Vídeo generado'); showToast('🎬 Vídeo listo');
         }
       } else if(status==='failed'||status==='error'){
@@ -816,19 +816,64 @@ async function pollVideoJob(jobId, prompt, dbId) {
   videoPollers[jobId]=setTimeout(poll,5000);
 }
 
-function replaceCardWithVideo(jobId,src,prompt){
+function replaceCardWithVideo(jobId,src,prompt,srcJobId){
   const card=document.getElementById(`job-${jobId}`); if(!card)return;
   addVideoToGallery(src,prompt,true,card);
 }
 
+async function redownloadVideo(jobId, item) {
+  const video = item.querySelector('video');
+  if (!video) return;
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const dlRes = await fetch(PROXY_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_KEY},
+      body: JSON.stringify({type:'video_download',payload:{jobId}})
+    });
+    if (dlRes.ok) {
+      const blob = await dlRes.blob();
+      video.src = URL.createObjectURL(blob);
+      video.load();
+      showToast('🎬 Vídeo cargado');
+    }
+  } catch(err) { showToast('Error al cargar vídeo', true); }
+}
+
 function addVideoToGallery(src,prompt,prepend=true,replaceEl=null){
   const item=document.createElement('div'); item.className='video-item';
-  const video=document.createElement('video'); video.src=src; video.controls=true; video.loop=true;
+  const isJobRef = src && src.startsWith('job:');
+  const jobId = isJobRef ? src.replace('job:','') : null;
+  const video=document.createElement('video'); video.controls=true; video.loop=true;
+  if (!isJobRef && src) { video.src=src; }
   const info=document.createElement('div'); info.className='video-item-info';
   const label=document.createElement('div'); label.className='video-item-prompt'; label.textContent=prompt;
   const dlBtn=document.createElement('button'); dlBtn.className='download-btn'; dlBtn.title='Descargar'; dlBtn.textContent='⬇';
-  dlBtn.onclick=()=>{const a=document.createElement('a');a.href=src;a.download=prompt.slice(0,40).replace(/[^a-z0-9]/gi,'_')+'.mp4';a.click();};
-  info.appendChild(label); info.appendChild(dlBtn);
+  dlBtn.onclick=async()=>{
+    if(isJobRef){
+      await redownloadVideo(jobId, item);
+      setTimeout(()=>{
+        const v=item.querySelector('video');
+        if(v&&v.src){const a=document.createElement('a');a.href=v.src;a.download=prompt.slice(0,40).replace(/[^a-z0-9]/gi,'_')+'.mp4';a.click();}
+      },2000);
+    } else {
+      const a=document.createElement('a');a.href=src;a.download=prompt.slice(0,40).replace(/[^a-z0-9]/gi,'_')+'.mp4';a.click();
+    }
+  };
+  const delVidBtn=document.createElement('button'); delVidBtn.className='download-btn'; delVidBtn.title='Eliminar'; delVidBtn.textContent='🗑';
+  delVidBtn.style.color='var(--error)';
+  delVidBtn.onclick=async()=>{
+    if(!confirm('¿Eliminar vídeo?')) return;
+    const ref = isJobRef ? src : src;
+    await sb.from('videos').delete().eq('user_id',currentUser.id).eq('url', ref);
+    item.remove();
+    showToast('Vídeo eliminado');
+    if(!document.getElementById('video-grid').children.length){
+      document.getElementById('video-grid').style.display='none';
+      document.getElementById('video-gallery-empty').style.display='flex';
+    }
+  };
+  info.appendChild(label); info.appendChild(dlBtn); info.appendChild(delVidBtn);
   item.appendChild(video); item.appendChild(info);
   if(replaceEl){replaceEl.replaceWith(item);}
   else{
@@ -837,6 +882,8 @@ function addVideoToGallery(src,prompt,prepend=true,replaceEl=null){
     grid.style.display='grid';
     if(prepend)grid.insertBefore(item,grid.firstChild); else grid.appendChild(item);
   }
+  // Si es una referencia a job, re-descargar automáticamente
+  if(isJobRef) redownloadVideo(jobId, item);
 }
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
