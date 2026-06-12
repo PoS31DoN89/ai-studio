@@ -341,7 +341,7 @@ const sb = (supabase.default || supabase).createClient(SUPABASE_URL, SUPABASE_KE
     detectSessionInUrl: false
   }
 });
-const PROXY_URL = 'https://bitter-wind-09e5.gsg283.workers.dev';
+const PROXY_URL = 'https://ai-studio-proxy-dubmbjgjg2chfybu.swedencentral-01.azurewebsites.net/api/proxy';
 
 async function callProxy(type, payload) {
   const { data: sessionData } = await sb.auth.getSession();
