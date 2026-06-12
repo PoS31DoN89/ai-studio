@@ -334,20 +334,31 @@
 // ── SUPABASE ──────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://yuzlutuqvwrmrcnxmlvb.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_JhGlJT4S1FXq5saglo9VRQ_nOaRP0A3';
-const sb = (supabase.default || supabase).createClient(SUPABASE_URL, SUPABASE_KEY);
-const PROXY_URL = 'https://yuzlutuqvwrmrcnxmlvb.supabase.co/functions/v1/azure-proxy';
+const sb = (supabase.default || supabase).createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false
+  }
+});
+const PROXY_URL = 'https://bitter-wind-09e5.gsg283.workers.dev';
 
 async function callProxy(type, payload) {
-  const { data: { session } } = await sb.auth.getSession();
+  const { data: sessionData } = await sb.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  console.log('callProxy', type, 'token:', token ? 'OK' : 'NULL');
+  if (!token) throw new Error('Sin sesión activa');
+
   const res = await fetch(PROXY_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${session.access_token}`,
+      'Authorization': `Bearer ${token}`,
       'apikey': SUPABASE_KEY
     },
     body: JSON.stringify({ type, payload })
   });
+  console.log('proxy response status:', res.status);
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
   return await res.json();
 }
@@ -396,8 +407,14 @@ async function doLogout() {
 async function onLogin(user) {
   currentUser = user;
 
+  // Debug: verificar sesión
+  const { data: { session } } = await sb.auth.getSession();
+  console.log('Session token:', session?.access_token ? 'OK' : 'NULL');
+  console.log('User ID:', user.id);
+
   // Cargar username
-  const { data: profile } = await sb.from('profiles').select('username').eq('id', user.id).single();
+  const { data: profile, error: profileError } = await sb.from('profiles').select('username').eq('id', user.id).single();
+  console.log('Profile result:', profile, 'Error:', profileError);
   const username = profile?.username || user.email.split('@')[0];
   document.getElementById('user-badge').textContent = '👤 ' + username;
 
@@ -473,7 +490,9 @@ async function loadChat(chatId) {
 }
 
 async function newChat() {
-  const { data } = await sb.from('chats').insert({ user_id: currentUser.id, title: 'Nueva conversación', messages: [] }).select().single();
+  const { data, error } = await sb.from('chats').insert({ user_id: currentUser.id, title: 'Nueva conversación', messages: [] }).select().single();
+  if (error) { console.error('newChat error:', error); showToast('Error al crear conversación: ' + error.message, true); return; }
+  if (!data) { console.error('newChat: no data returned'); return; }
   currentChatId = data.id;
   chatMessages = [];
   renderMessages();
@@ -508,10 +527,15 @@ function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.sc
 function handleChatKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();} }
 
 async function sendChat() {
-  if (!currentChatId) { await newChat(); }
   const input = document.getElementById('chat-input');
   const text  = input.value.trim();
   if (!text) return;
+
+  if (!currentChatId) {
+    await newChat();
+    if (!currentChatId) { showToast('Error al crear conversación', true); return; }
+  }
+
   input.value=''; input.style.height='auto';
   document.getElementById('send-btn').disabled=true;
 
