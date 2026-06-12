@@ -701,7 +701,7 @@ async function generateVideo() {
     // Guardar job en Supabase
     const {data:videoRow}=await sb.from('videos').insert({user_id:currentUser.id,prompt,job_id:jobId,size,duration:seconds,status:'pending'}).select().single();
     addVideoStatusCard(jobId, prompt);
-    pollVideoJob(jobId, prompt, baseUrl, videoRow?.id);
+    pollVideoJob(jobId, prompt, videoRow?.id);
     setStatus('Generando vídeo...','loading'); showToast('🎬 Vídeo en proceso (1-5 min)');
   } catch(err){setStatus(err.message,'error');showToast(err.message,true);}
   btn.disabled=false; btnText.textContent='🎬 Generar vídeo';
@@ -715,7 +715,7 @@ function addVideoStatusCard(jobId, prompt) {
   grid.insertBefore(card,grid.firstChild);
 }
 
-async function pollVideoJob(jobId, prompt, baseUrl, dbId) {
+async function pollVideoJob(jobId, prompt, dbId) {
   let attempts=0;
   const poll=async()=>{
     attempts++;
