@@ -291,8 +291,8 @@
         <div class="panel-section"><h4>Prompt</h4><textarea class="prompt-textarea" id="vid-prompt" placeholder="Describe el vídeo..."></textarea></div>
         <div class="panel-section"><h4>Duración</h4>
           <select class="select-field" id="vid-duration">
-            <option value="5">5 segundos</option>
-            <option value="10" selected>10 segundos</option>
+            <option value="4" selected>4 segundos</option>
+            <option value="8">8 segundos</option>
             <option value="12">12 segundos</option>
           </select>
         </div>
@@ -302,6 +302,19 @@
             <option value="1920x1080">1920×1080 — Full HD</option>
             <option value="720x1280">720×1280 — Vertical</option>
           </select>
+        </div>
+        <div class="panel-section"><h4>Referencia (opcional)</h4>
+          <div class="upload-area" id="vid-upload-area">
+            <input type="file" accept="image/*,video/*" id="vid-upload" onchange="handleVidUpload(event)">
+            <div class="upload-icon">📎</div>
+            <p>Imagen o vídeo de referencia</p>
+            <span>PNG, JPG, MP4, MOV</span>
+          </div>
+          <div class="uploaded-preview" id="vid-uploaded-preview" style="display:none">
+            <img id="vid-preview-img" src="" alt="preview" style="display:none">
+            <video id="vid-preview-vid" style="display:none;width:100%;border-radius:8px;max-height:120px" muted></video>
+            <button class="remove-img" onclick="removeVidRef()">✕</button>
+          </div>
         </div>
         <button class="generate-btn" id="video-gen-btn" onclick="generateVideo()"><span id="vid-btn-text">🎬 Generar vídeo</span></button>
       </div>
@@ -322,6 +335,22 @@
 const SUPABASE_URL = 'https://yuzlutuqvwrmrcnxmlvb.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_JhGlJT4S1FXq5saglo9VRQ_nOaRP0A3';
 const sb = (supabase.default || supabase).createClient(SUPABASE_URL, SUPABASE_KEY);
+const PROXY_URL = 'https://yuzlutuqvwrmrcnxmlvb.supabase.co/functions/v1/azure-proxy';
+
+async function callProxy(type, payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': SUPABASE_KEY
+    },
+    body: JSON.stringify({ type, payload })
+  });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e?.error?.message || `HTTP ${res.status}`); }
+  return await res.json();
+}
 
 let CFG = {};
 let currentUser = null;
@@ -492,13 +521,7 @@ async function sendChat() {
   setStatus('Pensando...','loading');
 
   try {
-    const res = await fetch(CFG.chatEndpoint, {
-      method:'POST',
-      headers:{'Content-Type':'application/json','api-key':CFG.chatKey},
-      body:JSON.stringify({ model:CFG.chatModel, input:chatMessages })
-    });
-    if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e?.error?.message||`HTTP ${res.status}`); }
-    const data = await res.json();
+    const data = await callProxy('chat', { model: CFG.chatModel, input: chatMessages });
     let reply='';
     if (data.output) { for(const item of data.output){if(item.type==='message'&&item.content){for(const c of item.content){if(c.type==='output_text')reply+=c.text;}}} }
     if (!reply&&data.choices) reply=data.choices[0]?.message?.content||'';
@@ -557,11 +580,9 @@ async function generateImage() {
   btn.disabled=true; btnText.textContent='⏳ Generando...';
   setStatus('Generando imagen...','loading');
   try {
-    const body={model:CFG.imgModel,prompt,n:1,size,quality};
-    if(uploadedImageB64)body.image=uploadedImageB64;
-    const res=await fetch(CFG.imgEndpoint,{method:'POST',headers:{'Content-Type':'application/json','api-key':CFG.imgKey},body:JSON.stringify(body)});
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||`HTTP ${res.status}`);}
-    const data=await res.json();
+    const imgPayload={model:CFG.imgModel,prompt,n:1,size,quality};
+    if(uploadedImageB64)imgPayload.image=uploadedImageB64;
+    const data=await callProxy('image', imgPayload);
     const imgData=data.data?.[0];
     if(!imgData)throw new Error('No se recibió imagen');
     const imgSrc=imgData.url||(imgData.b64_json?`data:image/png;base64,${imgData.b64_json}`:'');
@@ -598,6 +619,42 @@ async function loadVideos() {
   });
 }
 
+// ── VIDEO REFERENCE ──────────────────────────────────────────────────────────
+let vidRefB64 = null;
+let vidRefType = null;
+
+function handleVidUpload(e) {
+  const file = e.target.files[0]; if(!file) return;
+  const isVideo = file.type.startsWith('video/');
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    vidRefB64 = ev.target.result.split(',')[1];
+    vidRefType = isVideo ? 'video' : 'image';
+    document.getElementById('vid-upload-area').style.display = 'none';
+    const preview = document.getElementById('vid-uploaded-preview');
+    preview.style.display = 'block';
+    if (isVideo) {
+      const v = document.getElementById('vid-preview-vid');
+      v.src = ev.target.result; v.style.display = 'block';
+      document.getElementById('vid-preview-img').style.display = 'none';
+    } else {
+      const i = document.getElementById('vid-preview-img');
+      i.src = ev.target.result; i.style.display = 'block';
+      document.getElementById('vid-preview-vid').style.display = 'none';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeVidRef() {
+  vidRefB64 = null; vidRefType = null;
+  document.getElementById('vid-uploaded-preview').style.display = 'none';
+  document.getElementById('vid-upload-area').style.display = 'block';
+  document.getElementById('vid-upload').value = '';
+  document.getElementById('vid-preview-img').style.display = 'none';
+  document.getElementById('vid-preview-vid').style.display = 'none';
+}
+
 async function generateVideo() {
   const prompt=document.getElementById('vid-prompt').value.trim();
   if(!prompt){showToast('Escribe un prompt primero',true);return;}
@@ -608,15 +665,13 @@ async function generateVideo() {
   btn.disabled=true; btnText.textContent='⏳ Enviando...';
   setStatus('Creando job de vídeo...','loading');
   const [width,height]=size.split('x');
-  const baseUrl=`${CFG.videoEndpoint.replace(/\/$/,'')}/openai/deployments/${CFG.videoDeployment}/videos`;
   try {
-    const res=await fetch(`${baseUrl}?api-version=preview`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','api-key':CFG.videoKey},
-      body:JSON.stringify({model:CFG.videoDeployment,prompt,size:`${width}x${height}`,seconds:seconds.toString(),n:1})
-    });
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||`HTTP ${res.status}`);}
-    const job=await res.json();
+    const vidPayload = {model:CFG.videoDeployment,prompt,size:`${width}x${height}`,seconds:seconds.toString(),n:1};
+    if (vidRefB64) {
+      if (vidRefType === 'image') vidPayload.image = vidRefB64;
+      else if (vidRefType === 'video') vidPayload.video = vidRefB64;
+    }
+    const job=await callProxy('video', vidPayload);
     const jobId=job.id;
     if(!jobId)throw new Error('No se recibió ID de job');
     // Guardar job en Supabase
@@ -641,9 +696,14 @@ async function pollVideoJob(jobId, prompt, baseUrl, dbId) {
   const poll=async()=>{
     attempts++;
     try {
-      const res=await fetch(`${baseUrl}/${jobId}?api-version=preview`,{headers:{'api-key':CFG.videoKey}});
-      if(!res.ok)throw new Error(`HTTP ${res.status}`);
-      const data=await res.json();
+      const { data: { session } } = await sb.auth.getSession();
+      const pollRes=await fetch(PROXY_URL, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':`Bearer ${session.access_token}`,'apikey':SUPABASE_KEY},
+        body:JSON.stringify({type:'video_status',payload:{jobId}})
+      });
+      if(!pollRes.ok)throw new Error(`HTTP ${pollRes.status}`);
+      const data=await pollRes.json();
       const status=data.status;
       const badge=document.getElementById(`badge-${jobId}`);
       const bar=document.getElementById(`bar-${jobId}`);
@@ -657,7 +717,12 @@ async function pollVideoJob(jobId, prompt, baseUrl, dbId) {
         if(badge){badge.className='video-status-badge badge-succeeded';badge.textContent='✅ Listo';}
         if(bar)bar.style.width='100%';
         if(info)info.textContent='Descargando...';
-        const dlRes=await fetch(`${baseUrl}/${jobId}/content/video?api-version=preview`,{headers:{'api-key':CFG.videoKey}});
+        const { data: { session: dlSession } } = await sb.auth.getSession();
+        const dlRes=await fetch(PROXY_URL, {
+          method:'POST',
+          headers:{'Content-Type':'application/json','Authorization':`Bearer ${dlSession.access_token}`,'apikey':SUPABASE_KEY},
+          body:JSON.stringify({type:'video_download',payload:{jobId}})
+        });
         if(dlRes.ok){
           const blob=await dlRes.blob();
           const url=URL.createObjectURL(blob);
