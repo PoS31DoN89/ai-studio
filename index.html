@@ -750,8 +750,8 @@ async function generateVideo() {
   try {
     const vidPayload = {model:CFG.videoDeployment,prompt,size:`${width}x${height}`,seconds:seconds.toString()};
     if (vidRefB64) {
-      if (vidRefType === 'image') vidPayload.image = vidRefB64;
-      else if (vidRefType === 'video') vidPayload.video = vidRefB64;
+      if (vidRefType === 'image') vidPayload.input_reference = vidRefB64;
+      else if (vidRefType === 'video') vidPayload.input_reference = vidRefB64;
     }
     const job=await callProxy('video', vidPayload);
     const jobId=job.id;
