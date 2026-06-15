@@ -638,8 +638,12 @@ async function generateImage() {
   setStatus('Generando imagen...','loading');
   try {
     const imgPayload={model:CFG.imgModel,prompt,n:1,size,quality};
-    if(uploadedImageB64)imgPayload.image=uploadedImageB64;
-    const data=await callProxy('image', imgPayload);
+    let imgType = 'image';
+    if(uploadedImageB64){
+      imgPayload.image=uploadedImageB64;
+      imgType='image_edit';
+    }
+    const data=await callProxy(imgType, imgPayload);
     const imgData=data.data?.[0];
     if(!imgData)throw new Error('No se recibió imagen');
     const imgSrc=imgData.url||(imgData.b64_json?`data:image/png;base64,${imgData.b64_json}`:'');
