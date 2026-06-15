@@ -710,19 +710,32 @@ function handleVidUpload(e) {
   const isVideo = file.type.startsWith('video/');
   const reader = new FileReader();
   reader.onload = (ev) => {
-    vidRefB64 = ev.target.result.split(',')[1];
     vidRefType = isVideo ? 'video' : 'image';
     document.getElementById('vid-upload-area').style.display = 'none';
     const preview = document.getElementById('vid-uploaded-preview');
     preview.style.display = 'block';
     if (isVideo) {
+      vidRefB64 = ev.target.result.split(',')[1];
       const v = document.getElementById('vid-preview-vid');
       v.src = ev.target.result; v.style.display = 'block';
       document.getElementById('vid-preview-img').style.display = 'none';
     } else {
-      const i = document.getElementById('vid-preview-img');
-      i.src = ev.target.result; i.style.display = 'block';
-      document.getElementById('vid-preview-vid').style.display = 'none';
+      // Redimensionar imagen al tamaño del vídeo seleccionado
+      const size = document.getElementById('vid-size').value;
+      const [w, h] = size.split('x').map(Number);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const resized = canvas.toDataURL('image/png');
+        vidRefB64 = resized.split(',')[1];
+        document.getElementById('vid-preview-img').src = resized;
+        document.getElementById('vid-preview-img').style.display = 'block';
+        document.getElementById('vid-preview-vid').style.display = 'none';
+      };
+      img.src = ev.target.result;
     }
   };
   reader.readAsDataURL(file);
